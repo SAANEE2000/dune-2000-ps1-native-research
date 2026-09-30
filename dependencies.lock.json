@@ -1,0 +1,20 @@
+{
+  "ps1-recomp": {
+    "url": "https://github.com/PS1Recomp/ps1-recomp.git",
+    "commit": "ab4f0e01e6699c741bbc3d1ee73022be2803ff69",
+    "license": "GPL-3.0",
+    "submodules": ["third_party/ELFIO", "third_party/fmt", "third_party/toml11"]
+  },
+  "psxrecomp": {
+    "url": "https://github.com/RetroPortingToolKit/psxrecomp.git",
+    "commit": "470f03b7828c645f396cb7a6fdc9f52ca9c59de6",
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "submodules": []
+  },
+  "toolchain": {
+    "url": "https://github.com/RetroPortingToolKit/RetroPorting-Toolchains/releases/download/v1.0.14/cmake-clang-v1-windows-x64.zip",
+    "sha256": "28da9742385e7ff875b3d9311e8ed89dbdc84f27b6ecba2bc0d0acc11f6d2b4d",
+    "clang": "22.1.8",
+    "sdl3": "3.4.10"
+  }
+}
