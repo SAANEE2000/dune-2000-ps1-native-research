@@ -1,0 +1,20 @@
+[game]
+name = "Dune 2000 PS1 Native Baseline (boot)"
+id = "SLUS-00973"
+exe = "generated/assets/iso/SLUS_009.73"
+disc = "generated/assets/disc.cue"
+load_address = "0x80010000"
+entry_pc = "0x80010168"
+text_size = "0x8800"
+stack_base = "0x801FFFF0"
+[recompiler]
+seeds = "symbols/boot-functions.txt"
+bios_config = "third_party/psxrecomp/bios/OpenBIOS.toml"
+out_dir = "generated/native/boot"
+out_stem = "boot"
+discovery = "reachable"
+strict = true
+[runtime]
+bios_hle = true
+idle_skip = false
+[overlay]
