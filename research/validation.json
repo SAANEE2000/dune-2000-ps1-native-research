@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "source_sha256": "94e0800ef92cfe9de3bd44cdbd8e0a85d878bded0fcfbde0cf373b8e34eac711",
+  "iso_files": 7,
+  "mix_assets": 721,
+  "xa_records": 41,
+  "static_variants": 63247,
+  "all_known_guards_verified": true,
+  "full_static_coverage_proven": false,
+  "duckstation_parity_validated": false
+}

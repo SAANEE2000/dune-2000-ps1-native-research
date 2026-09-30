@@ -1,0 +1,1 @@
+# Conservative pass: the PS-X EXE entry is always seeded.

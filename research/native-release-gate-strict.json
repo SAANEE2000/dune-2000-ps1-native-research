@@ -1,0 +1,15 @@
+{
+  "build": "strict",
+  "native_only_release_allowed": false,
+  "checks": {
+    "mips_evaluator_not_linked": true,
+    "strict_fail_closed_adapter_linked": true,
+    "bios_not_linked": false,
+    "cpu_state_machine_removed": false,
+    "raw_bin_dependency_removed": false,
+    "hardware_register_runtime_removed": false,
+    "full_path_zero_fallback_proven": false,
+    "ai_parity_proven": false
+  },
+  "note": "Source/link inventory plus strict failure tests; zero full-path execution cannot be inferred from missing evaluator."
+}

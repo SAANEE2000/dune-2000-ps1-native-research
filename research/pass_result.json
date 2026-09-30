@@ -1,0 +1,29 @@
+{
+  "date": "2026-09-30",
+  "core_native_milestone": "BLOCKED",
+  "playable_research_launcher": "RunPCInput.cmd",
+  "strict_launcher": "RunRelease.cmd",
+  "strict_interpreter_evaluator_linked": false,
+  "strict_exit_code": 86,
+  "strict_blocker_pc": "0x8004545C",
+  "strict_blocker": "Existing static entry rejected after OpenBIOS changes three SDK instructions; live-byte guard stays enabled",
+  "gameplay_smoke": "boot, intro, menu, Atreides, briefing, A1 on final 63247-variant AOT generation",
+  "input_tests": "PASS: pure cursor math and SDL3 integration with assertions enabled",
+  "import_tests": "3 PASS",
+  "original_disc_hash_verified": true,
+  "pc_interpreter_instructions_in_retained_session": 204603391,
+  "pc_session_frame_sample": 88391,
+  "pc_session_telemetry_pcs": 42,
+  "bios_still_required": true,
+  "raw_bin_still_required": true,
+  "hardware_runtime_still_required": true,
+  "ai_001": "OPEN - no gameplay patch; no matched clean-reference replay",
+  "physical_dualsense_usb_bluetooth": "NOT VALIDATED",
+  "user_requested_shutdown_after_work": true,
+  "binary_sha256": {
+    "pc": "df411d9395be07684a5be0ad6eecc8921e39a097795781434f6068694e607fd0",
+    "strict": "787d972d5d393a6f7c93b2180872ff03bf104819408a39ddb09e3ca9c74731fa"
+  },
+  "aot_audit_sha256": "0211408a8eb2119702f0b0c6f789edfa4df36531097f122f972e812b488bccd9",
+  "temporary_aot_generation_directories_removed": true
+}

@@ -1,0 +1,9 @@
+{
+  "exit_origin": "sdl_window_close",
+  "reference_reproduction": "pending",
+  "unsupported": 0,
+  "cause": "UNKNOWN",
+  "frames": 51962,
+  "user_report": "Possible missing unit intelligence; working build",
+  "timestamp": "2026-09-29T21:37:56Z"
+}
