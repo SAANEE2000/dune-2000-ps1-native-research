@@ -1,0 +1,1066 @@
+ЗАДАЧА: DUNE 2000 PS1 NATIVE — УБРАТЬ PS1 EMULATION/FALLBACK И ДОБАВИТЬ PC INPUT
+
+Текущее состояние
+=================
+
+Уже существует рабочий proof-of-concept Dune 2000 PS1 SLUS-00973 под Windows x64.
+
+Подтверждено:
+
+- standalone Windows x64 executable;
+- оригинальный boot;
+- intro FMV;
+- главное меню;
+- выбор Atreides;
+- briefing;
+- запуск A1;
+- оригинальная игровая сцена;
+- исходный MIPS-код в значительной части AOT/recompiled в host x64.
+
+Но текущая архитектура всё ещё hybrid:
+
+1. большая часть игрового MIPS-кода статически рекомпилирована;
+2. неподдержанные/непокрытые участки могут уходить в fallback MIPS interpreter;
+3. GPU/SPU/CD/BIOS/timers/pad работают через PS1 compatibility runtime;
+4. raw BIN всё ещё используется как runtime CD source.
+
+Это был правильный промежуточный milestone.
+
+Теперь требуется сделать следующий архитектурный переход:
+
+Dune 2000 PS1
+       ↓
+recovered/recompiled gameplay code
+       ↓
+native host abstraction
+       ↓
+Windows x64
+
+Без MIPS interpreter.
+
+Без BIOS emulation.
+
+Без runtime-модели PS1 CPU/hardware registers.
+
+Без необходимости эмулировать PlayStation как устройство.
+
+Это должен стать настоящий source/recomp port.
+
+
+============================================================
+1. ГЛАВНОЕ ОГРАНИЧЕНИЕ
+============================================================
+
+НЕ МЕНЯТЬ gameplay.
+
+Пока не делать:
+
+- enhanced AI;
+- новые Houses;
+- Mercenaries;
+- Emperor;
+- Sardaukar modifications;
+- новые юниты;
+- batch production;
+- rebalance;
+- новые кампании;
+- большие карты;
+- снятие unit limit;
+- widescreen gameplay changes.
+
+Сначала получить чистый native baseline.
+
+Текущий AI-001 остаётся открытым и НЕ должен маскироваться gameplay-патчами.
+
+
+============================================================
+2. УБРАТЬ MIPS INTERPRETER ПОЛНОСТЬЮ
+============================================================
+
+Это главный приоритет.
+
+Сейчас существует residual interpreter fallback.
+
+Необходимо добиться:
+
+interp_instruction_count = 0
+interp_fallback_count = 0
+interp_unsupported_count = 0
+
+для всего проверенного игрового пути.
+
+Не допускается ситуация:
+
+"обычно native, но редкие ветки выполняются интерпретатором".
+
+Нужно:
+
+1. инвентаризировать ВСЕ адреса/continuations, уходящие в interpreter;
+2. классифицировать их:
+   - missed function;
+   - indirect jump;
+   - jump table;
+   - overlay;
+   - BIOS vector;
+   - callback;
+   - interrupt continuation;
+   - dynamically resolved address;
+3. добавить их в AOT/static recomp pipeline;
+4. восстановить корректные control-flow edges;
+5. исключить interpreter из release binary.
+
+В debug build допускается assertion:
+
+if (execution_attempts_interpreter)
+    fatal("Unexpected MIPS fallback");
+
+Но самого MIPS interpreter в release build быть не должно.
+
+
+============================================================
+3. OVERLAYS
+============================================================
+
+Отдельно разобрать DUNE overlay system.
+
+Текущий NATIVE-001 указывает, что часть проблемы связана с:
+
+- overlay continuations;
+- BIOS RAM vectors.
+
+Не хардкодить отдельные адреса хаотично.
+
+Нужно построить системный overlay loader/recompiler:
+
+overlay image
+    ↓
+known PS1 load address
+    ↓
+static function map
+    ↓
+native function table
+
+Если overlay содержится на CD:
+
+импортировать его при asset import/build stage.
+
+В runtime overlay load должен означать:
+
+активировать соответствующий native module/function table,
+
+а НЕ:
+
+загрузить MIPS blob и начать его интерпретировать.
+
+
+============================================================
+4. УБРАТЬ BIOS EMULATION
+============================================================
+
+Определить все BIOS calls, которые реально использует Dune 2000.
+
+Для каждого заменить его на host/native implementation.
+
+Категории:
+
+- memory;
+- events;
+- threads/callbacks;
+- controller;
+- CD;
+- file I/O;
+- timers;
+- memory card;
+- system utility calls.
+
+Сделать таблицу:
+
+PS1 BIOS call
+→ caller(s)
+→ semantics
+→ native replacement
+
+Например:
+
+PS1 PAD BIOS/API
+→ InputBackend
+
+PS1 CD API
+→ FileSystemBackend
+
+PS1 memory-card
+→ SaveBackend
+
+После этого runtime НЕ должен загружать retail BIOS или OpenBIOS.
+
+
+============================================================
+5. GPU: НЕ ЭМУЛИРОВАТЬ PS1 GPU, А ПЕРЕВОДИТЬ DRAW COMMANDS
+============================================================
+
+Оригинальный game code может продолжать формировать структуры вроде:
+
+POLY_FT4
+POLY_F4
+SPRT
+TILE
+DR_MODE
+OT
+
+Это нормально.
+
+Но host backend не должен моделировать:
+
+- PS1 GPU registers;
+- GP0/GP1 command FIFO;
+- DMA hardware;
+- VRAM как эмулируемое устройство;
+- GPU timing на уровне железа,
+
+если это не необходимо для семантики игры.
+
+Сделать translation layer:
+
+original game render primitives
+          ↓
+DuneRenderCommand
+          ↓
+native renderer
+          ↓
+SDL/OpenGL
+
+Например:
+
+POLY_FT4
+→ textured quad
+
+SPRT
+→ sprite
+
+TILE
+→ solid rectangle
+
+DrawOTag
+→ обход ordering table и генерация host draw calls
+
+Сохранить:
+
+- draw order;
+- blending semantics;
+- palette/CLUT semantics;
+- texture coordinates;
+- transparency;
+- dithering, если она влияет на внешний вид;
+- original viewport.
+
+На первом этапе:
+
+384x240 / оригинальная логическая система координат.
+
+Не делать пока HD graphics.
+
+
+============================================================
+6. TEXTURE / VRAM ABSTRACTION
+============================================================
+
+Если игра использует PS1 VRAM coordinates как IDs ресурсов, допустимо сохранить
+логическую модель.
+
+Но реализовать её как software resource atlas / texture manager.
+
+То есть:
+
+PS1 texture page + CLUT
+→ NativeTextureHandle
+
+а не полноценная эмуляция GPU VRAM.
+
+Если для parity проще сначала сохранить 1024x512 software VRAM buffer,
+это допустимо как transitional representation,
+
+НО:
+
+это должно быть обычной структурой renderer backend,
+а не PS1 GPU emulator с регистрами и command processor.
+
+
+============================================================
+7. AUDIO: ЗАМЕНИТЬ SPU EMULATION НА NATIVE MIXER
+============================================================
+
+Не моделировать SPU как устройство, если game logic этого не требует.
+
+Разобрать реальные операции игры:
+
+- load sample;
+- play sample;
+- stop sample;
+- set volume;
+- set pitch;
+- voice priority;
+- XA music;
+- announcements;
+- unit voices.
+
+Сделать:
+
+DuneAudio API
+
+примерно:
+
+Audio_LoadSample()
+Audio_PlaySample()
+Audio_StopChannel()
+Audio_SetVolume()
+Audio_PlayXA()
+Audio_StopMusic()
+
+Backend:
+
+SDL3 Audio или miniaudio.
+
+Оригинальные sample IDs и timing сохранить.
+
+При необходимости поддержать PS1 pitch semantics на уровне native mixer.
+
+Главное:
+
+gameplay/audio logic остаётся оригинальной,
+железо SPU больше не эмулируется.
+
+
+============================================================
+8. CD-ROM → NATIVE FILESYSTEM
+============================================================
+
+Убрать runtime зависимость от raw BIN.
+
+Создать importer:
+
+dune2000-import.exe <Dune2000.bin>
+
+Он:
+
+1. проверяет SHA-256:
+   94e0800ef92cfe9de3bd44cdbd8e0a85d878bded0fcfbde0cf373b8e34eac711
+
+2. извлекает нужные данные;
+
+3. сохраняет их локально:
+
+assets/
+    missions/
+    maps/
+    audio/
+    video/
+    textures/
+    data/
+    overlays/
+
+4. создаёт manifest.
+
+После импорта native game должна работать БЕЗ BIN/CUE.
+
+В репозиторий copyrighted assets не добавлять.
+
+
+============================================================
+9. TIMERS / VBLANK / GAME LOOP
+============================================================
+
+Это критически важно из-за текущего AI-001.
+
+Не использовать:
+
+"примерно 60 Hz, вроде похоже".
+
+Нужно восстановить реальную семантику оригинала.
+
+Определить:
+
+- NTSC VBlank rate;
+- game logic tick;
+- animation tick;
+- AI update cadence;
+- interrupt callbacks;
+- timer progression;
+- frame skipping;
+- number of original CPU cycles, если game logic на это реально полагается.
+
+Сделать native scheduler.
+
+Например:
+
+HostFrame()
+{
+    PollInput();
+
+    while (logicAccumulator >= GameTick)
+        OriginalGameTick();
+
+    Render();
+}
+
+Но конкретную модель взять из наблюдаемого поведения оригинала.
+
+AI-001 считать блокирующим regression-test.
+
+Не "чинить AI".
+
+Исправить timing/runtime так, чтобы исходный AI снова вёл себя правильно.
+
+
+============================================================
+10. CONTROL FLOW / FUNCTION POINTERS
+============================================================
+
+Особое внимание:
+
+- function pointers;
+- callbacks;
+- jump tables;
+- event callbacks;
+- interrupt callbacks;
+- overlay entry points.
+
+Нельзя оставлять:
+
+native code
+→ fake PS1 PC address
+→ interpreter dispatch.
+
+Нужна таблица:
+
+PS1 address → native function pointer.
+
+Например:
+
+NativeFn ResolvePsxFunction(uint32_t psxAddress);
+
+И все известные execution paths должны разрешаться в native host function.
+
+
+============================================================
+11. НОВАЯ INPUT ARCHITECTURE
+============================================================
+
+Теперь добавить нормальный PC input.
+
+Важно:
+
+НЕ переписывать gameplay/UI state machine.
+
+Нужно подавать input непосредственно в существующую игровую логику.
+
+
+============================================================
+12. МЫШЬ — ПРЯМОЕ УПРАВЛЕНИЕ КУРСОРОМ
+============================================================
+
+Главное изменение управления.
+
+Сейчас оригинал двигает cursor через PS1 controller.
+
+На PC мышь должна управлять игровым курсором НАПРЯМУЮ.
+
+Не делать:
+
+mouse delta
+→ virtual D-pad
+→ постепенное движение курсора.
+
+Нужно:
+
+host mouse position
+→ game cursor position.
+
+Учитывать:
+
+- window size;
+- integer scaling;
+- letterboxing;
+- fullscreen;
+- viewport transform.
+
+Например:
+
+window mouse coordinates
+        ↓
+logical game coordinates
+        ↓
+original cursor X/Y
+
+Ограничить cursor original viewport bounds.
+
+
+============================================================
+13. MOUSE BUTTONS
+============================================================
+
+Использовать существующие игровые actions.
+
+Рекомендуемый default:
+
+Left Mouse
+→ primary action / PS1 Cross
+
+Right Mouse
+→ secondary/cancel / PS1 Circle
+
+Middle Mouse
+→ configurable
+
+Mouse wheel
+→ если возможно, scroll sidebar/list,
+  иначе оставить configurable.
+
+НЕ внедрять новую RTS command model пока.
+
+Если какая-либо mapping конфликтует с оригинальным UI,
+определить фактическую семантику Cross/Circle и подобрать соответствующий mapping.
+
+Все mappings должны быть configurable.
+
+
+============================================================
+14. KEYBOARD
+============================================================
+
+Добавить полноценную клавиатуру.
+
+Минимум:
+
+Arrow keys / WASD
+→ движение cursor, если пользователь хочет keyboard mode
+
+Enter / Space
+→ primary action
+
+Escape
+→ cancel/back
+
+Tab
+→ configurable
+
+Shift
+Ctrl
+Alt
+Q/E
+и другие клавиши
+
+не назначать на новые gameplay features сейчас.
+
+Сделать единый Action enum:
+
+enum class GameAction
+{
+    Primary,
+    Secondary,
+    Menu,
+    Back,
+    CursorUp,
+    CursorDown,
+    CursorLeft,
+    CursorRight,
+    L1,
+    R1,
+    L2,
+    R2,
+    Start,
+    Select
+};
+
+Keyboard, mouse и gamepad должны генерировать GameAction,
+а gameplay не должен знать конкретное host device.
+
+
+============================================================
+15. GAMEPAD
+============================================================
+
+Использовать SDL3 Gamepad API.
+
+Нужна поддержка обычных современных контроллеров.
+
+В частности пользователь использует:
+
+Sony DualSense / PlayStation 5 controller.
+
+Поддержать:
+
+- USB;
+- Bluetooth, если SDL его видит;
+- buttons;
+- left stick;
+- D-pad;
+- triggers.
+
+Основной принцип:
+
+современный gamepad
+→ normalized game actions
+→ original input semantics.
+
+
+============================================================
+16. DUALSENSE DEFAULT MAPPING
+============================================================
+
+Default mapping максимально естественный:
+
+DualSense Cross
+→ PS1 Cross
+
+Circle
+→ Circle
+
+Square
+→ Square
+
+Triangle
+→ Triangle
+
+D-pad
+→ original D-pad
+
+L1/R1
+→ L1/R1
+
+L2/R2
+→ L2/R2
+
+Options
+→ Start
+
+Create
+→ Select
+
+L3/R3
+→ L3/R3, если game их использует.
+
+Left Stick:
+
+по умолчанию может управлять cursor velocity.
+
+Но D-pad должен продолжать работать отдельно.
+
+Right Stick пока не назначать на новые возможности.
+
+
+============================================================
+17. MOUSE + GAMEPAD HOT-SWAP
+============================================================
+
+Не требовать выбора input device в меню.
+
+Пользователь должен иметь возможность:
+
+двигать мышью
+→ cursor идёт за мышью
+
+взять DualSense
+→ cursor управляется стиком
+
+нажать клавишу
+→ keyboard работает
+
+в одной сессии.
+
+Последнее активное устройство можно использовать только для UI hints,
+но gameplay input должен переключаться автоматически.
+
+
+============================================================
+18. CURSOR OWNERSHIP
+============================================================
+
+Очень важно избежать fighting input.
+
+Если пришёл MouseMove:
+
+cursor mode = absolute mouse.
+
+Если пришёл gamepad stick/D-pad:
+
+cursor mode = relative/controller.
+
+Mouse не должен каждую frame возвращать cursor назад,
+если физически мышь не двигалась.
+
+Использовать last-device / dirty-input logic.
+
+
+============================================================
+19. FULLSCREEN / SCALING
+============================================================
+
+Добавить нормальное PC window handling:
+
+- windowed;
+- borderless fullscreen;
+- fullscreen;
+- resizing.
+
+Но game logical resolution пока сохранить оригинальный.
+
+Mouse coordinate transform должен оставаться корректным при:
+
+- 1x;
+- 2x;
+- 3x;
+- arbitrary window;
+- letterbox;
+- fullscreen.
+
+
+============================================================
+20. INPUT CONFIG
+============================================================
+
+Сделать простой config.
+
+Например:
+
+config/input.json
+
+или ini/toml.
+
+Минимум:
+
+mouse sensitivity
+controller cursor speed
+controller deadzone
+keyboard bindings
+gamepad bindings
+invert options, если понадобится
+
+Не делать пока большой graphical settings UI,
+если это задерживает основной port.
+
+
+============================================================
+21. СОХРАНИТЬ ORIGINAL CONTROLLER MODE
+============================================================
+
+Для parity/testing нужен режим:
+
+InputMode = PS1Compatible
+
+где gamepad ведёт себя практически как оригинальный DualShock.
+
+Также:
+
+InputMode = Native
+
+где доступны:
+
+- direct mouse;
+- keyboard;
+- modern gamepad.
+
+Это позволит сравнивать оригинальное управление и новый PC input.
+
+
+============================================================
+22. SAVE SYSTEM
+============================================================
+
+PS1 memory card hardware больше не эмулировать.
+
+Но формат save пока можно сохранить.
+
+Сделать:
+
+SaveBackend
+
+native path, например:
+
+%APPDATA%/Dune2000PSXNative/saves/
+
+Если проще:
+
+card0.mcd
+
+может остаться контейнером.
+
+Но игра не должна обращаться к virtual PS1 BIOS memory-card device.
+
+
+============================================================
+23. VIDEO
+============================================================
+
+Убрать зависимость от MDEC hardware emulation.
+
+Выбрать:
+
+A. собственный STR/MDEC decoder;
+
+или
+
+B. importer конвертирует FMV локально в удобный native format.
+
+Предпочтение:
+
+не распространять converted copyrighted videos.
+
+Importer делает преобразование из пользовательского BIN.
+
+Native runtime затем использует обычный video decoder/player.
+
+
+============================================================
+24. УДАЛИТЬ PS1 HARDWARE RUNTIME
+============================================================
+
+Конечная архитектура должна выглядеть примерно так:
+
+Recovered/Recompiled Dune Game Logic
+│
+├ Mission
+├ AI
+├ Units
+├ Buildings
+├ Campaign
+├ UI
+├ Economy
+├ Pathfinding
+└ Original gameplay state
+       │
+       ▼
+Native abstraction
+├ Renderer
+├ Audio
+├ Input
+├ FileSystem
+├ Video
+├ Save
+└ Timing
+       │
+       ▼
+SDL3 / OpenGL / host OS
+
+А НЕ:
+
+Dune logic
+       ↓
+PS1 virtual CPU/hardware
+       ↓
+host.
+
+
+============================================================
+25. НЕ УДАЛЯТЬ PS1 SEMANTICS БЕЗ НЕОБХОДИМОСТИ
+============================================================
+
+"Без слоя эмуляции" НЕ означает:
+
+переписать игру на современную архитектуру.
+
+Сохранять оригинальные:
+
+- structures;
+- state machines;
+- mission logic;
+- AI;
+- object update order;
+- random number behavior;
+- collision;
+- pathfinding;
+- rendering order,
+
+пока они не мешают native backend.
+
+Меняем platform dependency,
+а не игровую семантику.
+
+
+============================================================
+26. TESTING
+============================================================
+
+Создать regression test matrix:
+
+BOOT
+MENU
+HOUSE SELECT
+BRIEFING
+A1 START
+INPUT
+MOVE
+BUILD
+HARVEST
+COMBAT
+AI
+WIN
+TRANSITION
+SAVE
+LOAD
+FMV
+AUDIO
+
+Для каждого:
+
+Native
+Clean SLUS-00973 reference
+Status
+
+
+============================================================
+27. ОСОБО ПРОВЕРИТЬ AI-001
+============================================================
+
+Пользователь заметил:
+
+"как будто часть интеллекта у юнитов отсутствует".
+
+После удаления interpreter/runtime timing differences
+повторить одну и ту же сцену.
+
+Не пытаться улучшить AI.
+
+Нужно получить исходное поведение.
+
+Проверить:
+
+- target acquisition;
+- pathfinding;
+- retaliation;
+- autonomous unit movement;
+- enemy construction;
+- attacks;
+- harvester behavior.
+
+Если отличие остаётся:
+
+найти конкретное различие execution/timing/state.
+
+
+============================================================
+28. RELEASE ASSERTIONS
+============================================================
+
+Перед объявлением native-only milestone автоматически проверить:
+
+MIPS interpreter linked = NO
+MIPS runtime execution = 0
+BIOS image required = NO
+raw BIN required at runtime = NO
+PS1 CPU state machine required = NO
+
+PS1 hardware register emulator required = NO,
+кроме тех transitional частей, которые явно остаются blocker и перечислены.
+
+Не объявлять задачу выполненной, если interpreter просто "обычно не вызывается".
+
+
+============================================================
+29. DEFINITION OF DONE — NATIVE CORE
+============================================================
+
+Считать core-native milestone выполненным, когда:
+
+- игра запускается как Windows x64 EXE;
+- MIPS interpreter отсутствует;
+- BIOS отсутствует;
+- game code исполняется как native host code;
+- overlays тоже native;
+- GPU используется через native renderer;
+- audio через native mixer;
+- CD заменён native filesystem;
+- saves идут через native backend;
+- controller через SDL;
+- FMV не требует PS1 MDEC hardware runtime.
+
+
+============================================================
+30. DEFINITION OF DONE — PC INPUT
+============================================================
+
+Должно работать:
+
+MOUSE
+- direct cursor movement;
+- left/right buttons;
+- корректное scaling/fullscreen mapping.
+
+KEYBOARD
+- cursor controls;
+- primary/cancel/menu controls;
+- configurable bindings.
+
+GAMEPAD
+- SDL3;
+- DualSense;
+- USB;
+- Bluetooth при наличии SDL support;
+- D-pad;
+- left stick;
+- face buttons;
+- shoulder buttons;
+- Start/Select equivalents.
+
+Mouse/keyboard/gamepad должны hot-swap в runtime.
+
+
+============================================================
+31. НЕ ДЕЛАТЬ ПОКА
+============================================================
+
+Даже если native port уже позволяет:
+
+НЕ делать:
+
+- widescreen world expansion;
+- 4K assets;
+- HD textures;
+- 60 FPS simulation modifications;
+- enhanced AI;
+- increased unit cap;
+- batch unit orders;
+- Emperor campaign;
+- Mercenary factions;
+- new skirmish units in campaign.
+
+Это следующий этап.
+
+
+============================================================
+32. РЕЗУЛЬТАТ
+============================================================
+
+Нужен не только отчёт.
+
+Продолжать реализацию до максимально рабочего состояния.
+
+В конце предоставить:
+
+docs/NATIVE_PORT_STATUS.md
+docs/INPUT.md
+docs/PARITY.md
+docs/REMAINING_PS1_DEPENDENCIES.md
+
+И рабочий build.
+
+Отдельно перечислить:
+
+1. что полностью native;
+2. что осталось от PS1 abstraction;
+3. есть ли хоть один execution path через MIPS;
+4. есть ли BIOS dependency;
+5. есть ли raw BIN dependency;
+6. состояние mouse;
+7. состояние keyboard;
+8. состояние DualSense;
+9. состояние AI parity;
+10. следующий blocker.
+
+Главная цель:
+
+НЕ "запустить PS1-версию на PC".
+
+А:
+
+"превратить оригинальную Dune 2000 PS1 в настоящий Windows native port,
+максимально сохранив оригинальный gameplay".

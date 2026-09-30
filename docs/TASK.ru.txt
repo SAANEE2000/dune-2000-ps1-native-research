@@ -1,0 +1,892 @@
+ЗАДАЧА: DUNE 2000 PS1 / SLUS-00973 — NATIVE PC BASELINE
+
+Цель проекта
+============
+
+Нужно исследовать, дизассемблировать / декомпилировать / статически рекомпилировать
+оригинальную PlayStation 1 версию Dune 2000 и попытаться получить НАТИВНО
+запускаемую версию для Windows x64.
+
+Исходная игра:
+
+Dune 2000
+PlayStation / NTSC-U
+Serial: SLUS-00973
+Исходный образ SHA-256:
+
+94e0800ef92cfe9de3bd44cdbd8e0a85d878bded0fcfbde0cf373b8e34eac711
+
+Это тот же исходный Vector image, который уже использовался в предыдущем
+исследовании PS1-миссий.
+
+ВАЖНО:
+
+Это НЕ задача на модификацию игры.
+
+Это НЕ ремейк.
+
+Это НЕ перенос Dune 2000 PC.
+
+Это НЕ OpenRA.
+
+Это НЕ новый движок на Unity / Godot / Unreal.
+
+На данном этапе необходимо максимально точно сохранить поведение именно
+Dune 2000 для PlayStation.
+
+Конечная цель текущей стадии:
+
+Dune 2000 PS1
+        ↓
+оригинальный MIPS game code
+        ↓
+recompilation / recovered code
+        ↓
+native Windows executable
+        ↓
+игра визуально и логически ведёт себя как оригинальная PS1-версия
+
+
+============================================================
+0. ГЛАВНЫЙ ПРИНЦИП
+============================================================
+
+Не улучшать игру.
+
+Не исправлять оригинальные gameplay bugs.
+
+Не менять AI.
+
+Не менять баланс.
+
+Не добавлять юнитов.
+
+Не добавлять новые Houses.
+
+Не менять unit limits.
+
+Не менять campaign.
+
+Не менять миссии.
+
+Не использовать текущие Mercenary / Emperor patches.
+
+Работать ТОЛЬКО с чистым исходным образом указанного SHA-256.
+
+Нужен BASELINE, относительно которого позже можно будет делать Enhanced
+версию.
+
+
+============================================================
+1. СОЗДАТЬ ОТДЕЛЬНЫЙ ПРОЕКТ
+============================================================
+
+Не смешивать native-port исследования с текущим Mercenary ROM-hack.
+
+Создать отдельный каталог / репозиторий примерно такого вида:
+
+Dune2000PSXNative/
+    README.md
+    docs/
+    research/
+    symbols/
+    disasm/
+    src/
+    runtime/
+    tools/
+    scripts/
+    generated/
+    build/
+    tests/
+
+Оригинальный BIN/CUE в Git НЕ добавлять.
+
+Оригинальные ресурсы игры в Git НЕ добавлять.
+
+Любые generated-файлы, содержащие существенные части оригинальных ресурсов,
+держать локально и добавить в .gitignore.
+
+
+============================================================
+2. СНАЧАЛА ПРОВЕСТИ АУДИТ DUNE.EXE
+============================================================
+
+Перед попыткой native запуска полностью исследовать executable.
+
+Определить:
+
+- PS-X EXE header;
+- entry point;
+- initial PC;
+- GP;
+- load address;
+- text/code regions;
+- .data;
+- .bss;
+- executable size;
+- RAM layout;
+- stack;
+- heap;
+- static globals;
+- возможные overlays;
+- dynamically loaded executable code;
+- PsyQ libraries;
+- SDK version, если определяется;
+- BIOS calls;
+- GPU/GTE usage;
+- SPU usage;
+- CD-ROM API;
+- controller API;
+- timers;
+- interrupts;
+- DMA;
+- memory card subsystem;
+- STR/MDEC video playback;
+- XA/CD audio;
+- self-modifying code, если существует;
+- indirect jumps;
+- jump tables;
+- function pointers.
+
+Отдельно проверить:
+
+использует ли игра runtime-loaded overlays или исполняемый код,
+подгружаемый с CD.
+
+Это критично для static recompilation.
+
+
+============================================================
+3. ПОСТРОИТЬ DISASSEMBLY DATABASE
+============================================================
+
+Использовать подходящий PS1/MIPS toolchain.
+
+Допустимы:
+
+- Ghidra;
+- ghidra_psx_ldr;
+- PCSX-Redux debugging;
+- собственные Python scripts;
+- objdump / MIPS tools;
+- другие инструменты, если они реально помогают.
+
+Нужно получить карту функций.
+
+На первом проходе допустимы имена:
+
+FUN_80012340
+FUN_80012580
+DAT_800A1234
+
+Но создать собственную symbol database, которую можно постепенно улучшать.
+
+Формат желательно машинно-читаемый:
+
+symbols/
+    functions.csv/json
+    globals.csv/json
+    psyq.csv/json
+    known_functions.md
+
+Для каждой функции по возможности хранить:
+
+address
+size
+callers
+callees
+confidence
+proposed_name
+notes
+
+
+============================================================
+4. РАСПОЗНАТЬ PSYQ
+============================================================
+
+Это один из главных приоритетов.
+
+Максимально распознать стандартные Sony PsyQ функции.
+
+Например категории:
+
+GPU
+GTE
+SPU
+CD
+PAD
+MEMCARD
+MDEC
+LIBETC
+LIBGPU
+LIBSPU
+LIBCD
+
+Не декомпилировать библиотечные функции вручную, если они являются известной
+частью PsyQ и могут быть заменены runtime implementation.
+
+
+============================================================
+5. ИССЛЕДОВАТЬ STATIC RECOMPILATION
+============================================================
+
+Проверить применимость как минимум двух подходов:
+
+A. PS1Recomp
+B. RetroPortingToolKit / psxrecomp
+
+Не выбирать инструмент только потому, что он первым запустился.
+
+Сделать сравнительный отчёт:
+
+- способен ли распознать executable;
+- количество определённых функций;
+- PsyQ detection;
+- indirect jumps;
+- overlays;
+- runtime support;
+- graphics support;
+- audio support;
+- CD support;
+- MDEC/STR;
+- memory cards;
+- уровень ручной работы;
+- пригодность конкретно для Dune 2000.
+
+Если один вариант явно лучше — использовать его.
+
+Если оба плохо подходят, допускается собственный hybrid/static-recomp pipeline.
+
+Но обязательно объяснить причину.
+
+
+============================================================
+6. ЧТО СЧИТАЕТСЯ "NATIVE"
+============================================================
+
+Запуск DuckStation внутри программы НЕ считается native port.
+
+Запуск полноценного PS1 emulator core с оригинальным EXE без преобразования
+также НЕ является конечной целью.
+
+Допустим transitional runtime, реализующий PS1 API / hardware abstraction.
+
+Например:
+
+recompiled MIPS code
+        ↓
+PS1 compatibility runtime
+        ↓
+SDL/OpenGL/audio/filesystem
+        ↓
+Windows
+
+Это приемлемо.
+
+То есть игровой код должен исполняться как host/native compiled code,
+а не интерпретироваться полноценным PS1 CPU emulator.
+
+
+============================================================
+7. НЕ ПЫТАТЬСЯ СРАЗУ ПОЛУЧИТЬ КРАСИВЫЙ C++
+============================================================
+
+Не требуется сразу превращать:
+
+FUN_80042A10()
+
+в:
+
+Unit_UpdateMovement()
+
+Главная цель — executable parity.
+
+Допустим generated code вида:
+
+void func_80042A10(Context* ctx)
+{
+    ...
+}
+
+Если он правильно повторяет оригинальное поведение — это успех.
+
+Чистая декомпиляция будет следующим этапом.
+
+
+============================================================
+8. PLATFORM RUNTIME
+============================================================
+
+Для первого native-port предпочтительный host:
+
+Windows x64.
+
+Рекомендуемый минимальный platform stack:
+
+C/C++20
+CMake
+SDL3
+
+Renderer:
+
+сначала выбрать самый простой технически рабочий вариант.
+
+Допустим:
+
+OpenGL
+
+или runtime graphics backend существующего recomp framework.
+
+НЕ делать пока:
+
+- Vulkan rewrite;
+- DirectX rewrite;
+- HD renderer;
+- widescreen hacks;
+- shader improvements.
+
+Наша задача — вывести оригинальную картинку.
+
+
+============================================================
+9. PS1 GPU / RENDERING
+============================================================
+
+Сначала сохранить оригинальный rendering model насколько возможно.
+
+Не переделывать игру на современную scene graph систему.
+
+Если оригинальный game code выдаёт PS1 GPU primitives:
+
+POLY_FT4
+SPRT
+TILE
+DR_MODE
+и т.д.
+
+то runtime должен их корректно интерпретировать.
+
+Приоритет:
+
+правильность > красота.
+
+Первый успех может рендериться в оригинальном internal resolution.
+
+
+============================================================
+10. TIMING
+============================================================
+
+Очень важно не привязать gameplay напрямую к скорости современного CPU.
+
+Определить:
+
+- основной game tick;
+- VBlank usage;
+- timer usage;
+- frame pacing;
+- PAL/NTSC assumptions;
+- logic frequency;
+- animation frequency.
+
+Native build должен первоначально повторять NTSC SLUS-00973 timing.
+
+Не делать пока 60 FPS gameplay hack, если оригинальная simulation работает
+иначе.
+
+
+============================================================
+11. INPUT
+============================================================
+
+На первом этапе эмулировать оригинальный PS1 controller interface.
+
+SDL input:
+
+keyboard/controller
+        ↓
+virtual PS1 pad state
+        ↓
+original Dune input logic
+
+Не переписывать интерфейс под мышь.
+
+Mouse support будет позже.
+
+Нужна возможность использовать:
+
+D-pad
+Cross
+Circle
+Square
+Triangle
+L1/L2/R1/R2
+Start
+Select
+Analog/L3/R3, если игра их использует.
+
+
+============================================================
+12. AUDIO
+============================================================
+
+Сохранить оригинальное поведение audio subsystem.
+
+Исследовать:
+
+- XA;
+- SPU samples;
+- voice playback;
+- music;
+- effects;
+- construction announcements;
+- unit responses.
+
+На этом этапе НЕ исправлять существующие ограничения sub-house audio.
+
+Baseline должен соответствовать оригинальной игре.
+
+
+============================================================
+13. CD / FILESYSTEM
+============================================================
+
+Не делать native port зависимым навсегда от raw BIN sectors.
+
+Но на первом этапе допустим compatibility filesystem.
+
+Желательная архитектура:
+
+оригинальный CD file request
+        ↓
+virtual PS1 filesystem
+        ↓
+локально extracted assets
+
+Создать importer:
+
+dune2000-import <user-owned BIN/CUE>
+
+Он:
+
+1. проверяет SHA-256;
+2. определяет SLUS-00973;
+3. извлекает необходимые assets локально;
+4. складывает их в generated/assets;
+5. ничего copyrighted не коммитит в repository.
+
+Native executable затем читает local imported assets.
+
+Если для раннего proof-of-concept проще читать BIN напрямую — допустимо,
+но зафиксировать это как временное решение.
+
+
+============================================================
+14. VIDEO
+============================================================
+
+Обязательно проверить FMV.
+
+Dune 2000 использует PlayStation video resources.
+
+Для BASELINE допустимы два пути:
+
+A. runtime decode оригинального PS1 STR/MDEC;
+B. extraction + local conversion during import.
+
+Но:
+
+- timing сохранить;
+- aspect ratio сохранить;
+- audio sync сохранить;
+- содержание не менять.
+
+
+============================================================
+15. SAVE SYSTEM
+============================================================
+
+На первом этапе желательно сохранить семантику оригинальных saves.
+
+Можно реализовать virtual memory card:
+
+memorycard.mcd
+
+или преобразовать её в host file abstraction.
+
+Но native game должна:
+
+- создавать save;
+- видеть save;
+- загружать его;
+- сохранять campaign progress.
+
+Формат пока не модернизировать.
+
+
+============================================================
+16. VALIDATION AGAINST DUCKSTATION
+============================================================
+
+DuckStation использовать как reference implementation.
+
+Для каждой стадии сравнивать:
+
+Native
+vs
+Clean SLUS-00973 running in DuckStation
+
+Минимальные checkpoints:
+
+- boot;
+- Westwood/logo screens;
+- intro;
+- main menu;
+- house selection;
+- briefing;
+- mission start;
+- rendering;
+- input;
+- unit selection;
+- movement;
+- construction;
+- harvesting;
+- combat;
+- AI;
+- victory;
+- defeat;
+- campaign transition;
+- save;
+- load;
+- audio;
+- FMV.
+
+Все расхождения записывать.
+
+
+============================================================
+17. НУЖЕН "PARITY ISSUES" СПИСОК
+============================================================
+
+Создать:
+
+docs/PARITY.md
+
+Формат:
+
+[WORKING]
+Boot
+Main menu
+
+[PARTIAL]
+FMV audio sync
+
+[BROKEN]
+Memory card save
+
+[UNKNOWN]
+Late campaign ending
+
+Для каждого отклонения:
+
+- observed native behavior;
+- DuckStation/original behavior;
+- suspected subsystem;
+- severity.
+
+
+============================================================
+18. ТЕСТОВЫЕ CHECKPOINTS
+============================================================
+
+Не пытаться сразу пройти всю игру.
+
+Milestone 0:
+DUNE.EXE parsed and mapped.
+
+Milestone 1:
+generated/recompiled executable enters original entry point.
+
+Milestone 2:
+first visible graphics.
+
+Milestone 3:
+intro/title screen.
+
+Milestone 4:
+main menu accepts controller input.
+
+Milestone 5:
+House selection works.
+
+Milestone 6:
+Atreides/Harkonnen/Ordos Mission 1 starts.
+
+Milestone 7:
+unit movement and building work.
+
+Milestone 8:
+AI functions.
+
+Milestone 9:
+mission can be won.
+
+Milestone 10:
+campaign transition works.
+
+Milestone 11:
+save/load works.
+
+Milestone 12:
+one complete original campaign can be finished.
+
+
+============================================================
+19. DEBUGGING
+============================================================
+
+Добавить developer-only diagnostics, которые НЕ меняют game behavior.
+
+Допустимы:
+
+- logs;
+- function tracing;
+- assertions;
+- PS1 address display;
+- call tracing;
+- GPU primitive dump;
+- CD request logging;
+- audio request logging.
+
+Например:
+
+[PSX] FUN_80043120 called
+[CD] open \DATA\O1V1.MIS
+[GPU] DrawOTag(...)
+[SPU] voice 0x34
+
+Но debug functionality должна отключаться в release build.
+
+
+============================================================
+20. НИКАКИХ ОПТИМИЗАЦИЙ ПОКА
+============================================================
+
+Не оптимизировать:
+
+pathfinding
+AI
+rendering
+memory
+mission parsing
+
+Даже если оригинальный код кажется ужасным.
+
+Если он работает так на PS1 — сначала воспроизвести именно его.
+
+
+============================================================
+21. НЕ ИСПОЛЬЗОВАТЬ PC DUNE 2000 КАК ИСХОДНИК
+============================================================
+
+Можно использовать PC Dune 2000 только как справочный материал для:
+
+- названий структур;
+- понимания механик;
+- сравнения алгоритмов;
+- известных constants.
+
+Но нельзя подменить задачу портированием PC версии.
+
+Если PS1 и PC отличаются — PS1 является источником истины.
+
+
+============================================================
+22. СУЩЕСТВУЮЩИЙ DUNE RESEARCH
+============================================================
+
+Текущий PS1 ROM-hack repository можно использовать как дополнительную
+документацию.
+
+Уже известны, например:
+
+- mission files;
+- PS1 disc structure;
+- House slots;
+- mission catalogue;
+- saves;
+- CD sector handling;
+- EDC/ECC tooling.
+
+Но НЕ использовать patched Mercenary/Emperor BIN.
+
+Native baseline должен строиться только из оригинального SHA-256 образа.
+
+
+============================================================
+23. DELIVERABLES ПЕРВОГО ИССЛЕДОВАТЕЛЬСКОГО ПРОХОДА
+============================================================
+
+Даже если полноценный запуск не получится за один проход, результат не должен
+быть просто текстовым отчётом.
+
+Нужно сохранить всё полезное:
+
+README.md
+
+docs/
+    ARCHITECTURE.md
+    MEMORY_MAP.md
+    RECOMP_ANALYSIS.md
+    PSYQ.md
+    PARITY.md
+
+symbols/
+    functions.*
+    globals.*
+    psyq.*
+
+tools/
+    extract/import scripts
+    analysis scripts
+
+src/ или generated/
+    весь полученный recomp/decomp output
+
+build scripts
+
+И отдельно:
+
+docs/NEXT_STEPS.md
+
+где перечислить конкретные blockers.
+
+
+============================================================
+24. DEFINITION OF SUCCESS — УРОВЕНЬ A
+============================================================
+
+Минимальный успешный research milestone:
+
+- DUNE.EXE корректно разобран;
+- memory map известна;
+- функции обнаружены;
+- PsyQ в значительной степени распознан;
+- static recomp strategy выбрана;
+- blockers определены;
+- build pipeline воспроизводим.
+
+
+============================================================
+25. DEFINITION OF SUCCESS — УРОВЕНЬ B
+============================================================
+
+Первый реальный native proof-of-concept:
+
+Dune2000Native.exe
+
+запускается как обычная Windows x64 программа и показывает хотя бы
+оригинальный boot/title/menu sequence.
+
+Без запуска DuckStation.
+
+
+============================================================
+26. DEFINITION OF SUCCESS — УРОВЕНЬ C
+============================================================
+
+Настоящий baseline:
+
+- native Windows executable;
+- оригинальное меню;
+- оригинальная графика;
+- оригинальный звук;
+- оригинальные три campaign;
+- оригинальные missions;
+- оригинальный AI;
+- оригинальное управление;
+- original campaign progression;
+- save/load;
+- FMV;
+- игру возможно пройти.
+
+На этом этапе:
+
+никаких Enhanced изменений.
+
+
+============================================================
+27. ГЛАВНАЯ ЦЕЛЬ ПРОЕКТА ПОСЛЕ BASELINE
+============================================================
+
+НЕ РЕАЛИЗОВЫВАТЬ СЕЙЧАС.
+
+После получения PS1-accurate native baseline мы отдельно создадим ветку:
+
+Enhanced
+
+где уже появятся:
+
+- improved AI;
+- batch unit ordering;
+- полноценный Emperor / Corrino;
+- Sardaukar;
+- Grey Mercenaries;
+- Light Mercenaries;
+- skirmish-only units in campaigns;
+- larger unit limits;
+- modern controls;
+- новые кампании;
+- новые карты.
+
+Сейчас НЕ делать ничего из этого.
+
+
+============================================================
+28. ПРИНЦИП РАБОТЫ
+============================================================
+
+Не угадывать.
+
+Для каждого серьёзного вывода указывать evidence.
+
+Разделять:
+
+CONFIRMED
+LIKELY
+HYPOTHESIS
+UNKNOWN
+
+Не объявлять функцию распознанной только потому, что декомпилятор выдал
+правдоподобный C.
+
+Проверять через:
+
+- callers;
+- callees;
+- constants;
+- data references;
+- runtime traces;
+- DuckStation/PCSX-Redux comparison.
+
+
+============================================================
+ФИНАЛЬНАЯ ФОРМУЛИРОВКА
+============================================================
+
+Наша задача сейчас:
+
+"Заставить оригинальную Dune 2000 для PlayStation SLUS-00973 работать
+нативно на PC с максимально возможным сохранением исходного поведения,
+НЕ меняя саму игру."
+
+Сначала сделай аудит и выбери технический путь.
+
+После этого не останавливайся на отчёте, если нет фундаментального blocker:
+попытайся собрать и запустить первый native executable.
+
+Не улучшай игру.
+
+Не переписывай её с нуля.
+
+Сначала сохрани оригинал.
